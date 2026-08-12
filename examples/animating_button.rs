@@ -1,6 +1,5 @@
 use gpui_platform;
 use gpui_rendermode::gpui::*;
-use gpui_rendermode::gpui::Styled;
 use gpui_rendermode::{RenderMode, PacedViewExt, PacedView};
 use std::env;
 
@@ -109,7 +108,6 @@ impl Render for GridApp {
 }
 
 fn main() {
-    // 1. Parse the first CLI argument as a usize, default to 20
     let num_buttons = env::args()
         .nth(1)
         .and_then(|arg| arg.parse::<usize>().ok())
@@ -117,7 +115,6 @@ fn main() {
 
     println!("Rendering {} buttons...", num_buttons);
 
-    // 2. Add `move` so the closure takes ownership of `num_buttons`
     gpui_platform::application().run(move |cx: &mut App| {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -127,7 +124,6 @@ fn main() {
             ..Default::default()
         };
 
-        // Add `move` here as well
         cx.open_window(options, move |_window, cx| {
             cx.new(|cx| {
                 let mut children = Vec::new();
