@@ -1,0 +1,17 @@
+[package]
+name = "gpui-rendermode"
+version = "0.1.0"
+edition = "2021"
+description = "Declarative frame scheduling and animation for GPUI"
+
+[dependencies]
+gpui_unofficial = { package = "gpui-unofficial", version = "^1.14.2", optional = true }
+gpui_ce = { package = "gpui-ce", version = ">=0.3.3", optional = true }
+
+[dev-dependencies]
+gpui_platform = { package = "gpui-platform-gpui-unofficial", version = "^1.14.2" }
+
+[features]
+default = ["gpui-unofficial"]
+gpui-unofficial = ["dep:gpui_unofficial"]
+gpui-ce = ["dep:gpui_ce"]
