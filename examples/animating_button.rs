@@ -26,21 +26,9 @@ impl RenderMode for HoverLoop {
     }
 
     fn tick(&mut self, dt: f32, _cx: &mut Context<Self>) {
-        if self.forward {
-            if self.progress < 1.0 {
-              self.progress += dt * 1.5; 
-              if self.progress > 1.0 {
-                  self.progress = 1.0;
-              }
-            }
-        } else {
-            if self.progress > 0.0 {
-                self.progress -= dt * 1.5;
-                if self.progress < 0.0 {
-                    self.progress = 0.0;
-                }
-            }
-        }
+        const speed = 1.5;
+        let direction = if self.forward { 1.0 } else { -1.0 };
+        self.progress = (self.progress + dt * speed * direction).clamp(0.0, 1.0);
     }
 }
 
