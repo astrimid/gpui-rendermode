@@ -1,6 +1,6 @@
 [package]
 name = "gpui-rendermode"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Declarative frame scheduling and animation for GPUI"
 license = "MIT OR Apache-2.0"

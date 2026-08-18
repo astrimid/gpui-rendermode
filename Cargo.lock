@@ -2837,7 +2837,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-rendermode"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui-ce",
  "gpui-platform-gpui-unofficial",
