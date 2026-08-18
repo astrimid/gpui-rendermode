@@ -6,6 +6,7 @@ use std::env;
 struct HoverLoop {
     id: usize,
     progress: f32,
+    forward: bool,
     is_hovered: bool,
 }
 
@@ -13,11 +14,7 @@ impl HoverLoop {
     fn set_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
         if self.is_hovered != hovered {
             self.is_hovered = hovered;
-            
-            if !hovered {
-                self.progress = 0.0;
-            }
-            
+            self.forward = hovered;
             cx.notify();
         }
     }
@@ -25,15 +22,23 @@ impl HoverLoop {
 
 impl RenderMode for HoverLoop {
     fn is_continuous(&self) -> bool {
-        self.is_hovered
+        self.is_hovered || self.progress > 0.0
     }
 
     fn tick(&mut self, dt: f32, _cx: &mut Context<Self>) {
-        if self.is_hovered {
-            self.progress += dt * 1.5; 
-            
-            if self.progress >= 1.0 {
-                self.progress = 0.0; 
+        if self.forward {
+            if self.progress < 1.0 {
+              self.progress += dt * 1.5; 
+              if self.progress > 1.0 {
+                  self.progress = 1.0;
+              }
+            }
+        } else {
+            if self.progress > 0.0 {
+                self.progress -= dt * 1.5;
+                if self.progress < 0.0 {
+                    self.progress = 0.0;
+                }
             }
         }
     }
@@ -42,6 +47,7 @@ impl RenderMode for HoverLoop {
 impl Render for HoverLoop {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id(self.id)
             .flex()
             .flex_col()
             .bg(rgb(0x1e293b))
@@ -86,11 +92,12 @@ impl Render for HoverLoop {
     }
 }
 
-struct GridApp {
-    children: Vec<Entity<PacedView<HoverLoop>>>,
+struct GridApp<T: gpui_rendermode::gpui::Render + gpui_rendermode::RenderMode> {
+    children: Vec<Entity<PacedView<T>>>,
+    widget_style: StyleRefinement,
 }
 
-impl Render for GridApp {
+impl<T: gpui_rendermode::gpui::Render + gpui_rendermode::RenderMode> Render for GridApp<T> {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("grid")
@@ -103,7 +110,12 @@ impl Render for GridApp {
             .content_start() 
             .gap_4()
             .p_8()
-            .children(self.children.iter().cloned())
+            .children(
+                self.children
+                    .iter()
+                    .cloned()
+                    .map(|child| child.cached(self.widget_style.clone()))
+            )
     }
 }
 
@@ -123,21 +135,31 @@ fn main() {
             })),
             ..Default::default()
         };
+        let widget_style = StyleRefinement {
+            size: SizeRefinement {
+                width: Some(px(200.0).into()),
+                height: Some(px(160.0).into()),
+            },
+            ..Default::default()
+        };
 
         cx.open_window(options, move |_window, cx| {
             cx.new(|cx| {
                 let mut children = Vec::new();
                 
-                // 3. Use our dynamic CLI variable
                 for i in 0..num_buttons {
                     children.push(cx.new_paced_view(|_cx| HoverLoop {
                         id: i,
                         progress: 0.0,
+                        forward: true,
                         is_hovered: false,
                     }));
                 }
                 
-                GridApp { children }
+                GridApp { 
+                    children,
+                    widget_style,
+                }
             })
         }).unwrap();
     });

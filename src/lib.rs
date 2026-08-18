@@ -18,7 +18,7 @@ pub trait RenderMode: 'static + Sized {
 
 pub struct PacedView<V: RenderMode + Render> {
     pub inner: Entity<V>,
-    last_tick: Instant,
+    last_tick: Option<Instant>,
     frame_scheduled: bool,
 }
 
@@ -35,23 +35,28 @@ impl<V: RenderMode + Render> PacedView<V> {
         });
 
         if !is_continuous {
-            self.last_tick = Instant::now();
+            self.last_tick = None;
             return;
         }
 
         let now = Instant::now();
-        let elapsed = now.duration_since(self.last_tick);
 
-        if let Some(min) = min_interval {
-            if elapsed < min {
-                self.frame_scheduled = true;
-                cx.on_next_frame(window, Self::on_frame);
-                return;
+        let dt = match self.last_tick {
+            Some(last) => {
+                let elapsed = now.duration_since(last);
+
+                if let Some(min) = min_interval {
+                    if elapsed < min {
+                        self.frame_scheduled = true;
+                        cx.on_next_frame(window, Self::on_frame);
+                        return;
+                    }
+                }
+                elapsed.as_secs_f32().min(0.1)
             }
-        }
-
-        let dt = elapsed.as_secs_f32();
-        self.last_tick = now;
+            None => 0.0,
+        };
+        self.last_tick = Some(now);
 
         self.inner.update(cx, |inner, cx| {
             inner.tick(dt, cx);
@@ -77,7 +82,7 @@ impl<V: RenderMode + Render> Render for PacedView<V> {
             
             cx.on_next_frame(window, Self::on_frame);
         } else if !is_continuous {
-            self.last_tick = Instant::now();
+            self.last_tick = None;
         }
 
         // Entity<V> natively implements IntoElement if V: Render!
@@ -101,7 +106,7 @@ impl PacedViewExt for App {
             let inner = cx.new(build_view);
             PacedView {
                 inner,
-                last_tick: Instant::now(),
+                last_tick: None,
                 frame_scheduled: false,
             }
         })
