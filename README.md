@@ -1,21 +1,197 @@
 # gpui-rendermode
 
-**Declarative frame scheduling and VSync-aligned animation loops for Zed's GPUI framework.**
+**Painless animations for GPUI** — automatic frame scheduling with 0% CPU when idle.
 
-Building continuous animations (progress bars, spinners, or video) in GPUI requires ...
+## The Animation Pipeline
 
-`gpui-rendermode` abstracts the boilerplate away. It provides a simple `RenderMode` trait that gives your components a clean `tick(dt)` method, automatically handling delta-time math, frame scheduling, and CPU parking when animations are paused.
+GPUI animations follow 4 layers:
 
-## Features
+1. **Clocking** — when and how often progress advances
+2. **Control** — start, stop, reset, pause, reverse, repeat
+3. **Interpolation** — progress-to-value mapping
+4. **Rendering** — converting the current value into GPUI elements
 
-* **⏱️ Delta Time (`dt`) provided automatically:** Write frame-rate independent animations.
-* **⏸️ Auto-parking:** Return `false` from `is_continuous()` and your loop goes to sleep at 0% CPU. To wake up, just change that boolean and notify the Entity/View from the input event handler to invalidate the view and cause animation to start running on next frame.
-* **🐢 Throttling:** Optional `min_frame_interval` for locking frame rates (e.g., 30 FPS limits).
-* **🧩 Native GPUI Integration:** Completely transparent to GPUI. `PacedView<T>` implements `Render` and generates a standard `View<T>`.
+`gpui-rendermode` handles **Clocking** for you, so you can focus on the rest.
+
+## The Problem
+
+Without this crate, Clocking means manually handling:
+- Delta time calculations
+- Frame scheduling (`request_animation_frame`)
+- CPU management (preventing wasted cycles)
+
+## The Solution
+
+Implement `RenderMode` for your component. You get:
+- ✅ Automatic `dt` (delta time) in seconds — **Clocking** done
+- ✅ Auto-parking — loop sleeps when not needed
+- ✅ Optional frame rate limiting
+- ✅ GPUI integration — just use `PacedView`
+
+## Quick Example
+
+A progress bar that fills on hover and smoothly drains when you leave:
+
+```rust
+use gpui::*;
+use gpui_rendermode::RenderMode;
+
+struct HoverProgress {
+    progress: f32,
+    is_hovered: bool,
+}
+
+impl RenderMode for HoverProgress {
+    // Control: Run while hovered OR while progress is draining back to 0
+    fn is_continuous(&self) -> bool {
+        self.is_hovered || self.progress > 0.0
+    }
+
+    // Clocking: `dt` = seconds since last frame (frame-rate independent)
+    fn tick(&mut self, dt: f32, _cx: &mut Context<Self>) {
+        // Control + Interpolation combined
+        const SPEED: f32 = 1.5;
+        let direction = if self.is_hovered { 1.0 } else { -1.0 };
+        self.progress = (self.progress + dt * SPEED * direction).clamp(0.0, 1.0);
+    }
+}
+
+impl Render for HoverProgress {
+    // Rendering: Convert progress to GPUI elements
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(200.0))
+            .h(px(40.0))
+            .bg(rgb(0x1a1a1a))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                this.is_hovered = *hovered;
+                cx.notify(); // Wake up the animation
+            }))
+            .child(
+                div()
+                    .w(relative(self.progress)) // Interpolation: progress → width
+                    .h_full()
+                    .bg(rgb(0x3b82f6))
+            )
+    }
+}
+```
+
+## Usage
+
+```rust
+use gpui_rendermode::PacedViewExt;
+
+// Instead of cx.new_view(), use:
+cx.new_paced_view(|_cx| HoverProgress {
+    progress: 0.0,
+    is_hovered: false,
+})
+```
+
+## How It Works
+
+The `PacedView` wrapper manages the frame loop for you:
+
+| Your Component | `PacedView` wrapper |
+|----------------|---------------------|
+| `is_continuous()` → true | Schedules next frame via `cx.on_next_frame()` |
+| `tick(dt)` | Gets real delta time (in seconds) |
+| `is_continuous()` → false | Stops scheduling — **0% CPU usage** |
+| `cx.notify()` | Wakes up the loop from any event handler |
+
+### Key Pattern: Smart Continuous Detection
+
+Notice the `is_continuous()` logic:
+```rust
+fn is_continuous(&self) -> bool {
+    self.is_hovered || self.progress > 0.0
+}
+```
+
+This ensures:
+- Animation runs **while hovered** (filling up)
+- Animation runs **after hover ends** (draining back to 0)
+- Animation stops **when completely drained** (0% CPU)
+
+## Advanced Features
+
+### Frame Rate Limiting (Clocking)
+
+```rust
+impl RenderMode for MyAnimation {
+    fn min_frame_interval(&self) -> Option<Duration> {
+        Some(Duration::from_millis(33)) // 30 FPS max
+    }
+}
+```
+
+### Full Control Layer
+
+```rust
+struct FullControl {
+    progress: f32,
+    state: PlayState,
+    direction: f32, // 1.0 or -1.0
+}
+
+enum PlayState { Idle, Playing, Paused, Reversing }
+
+impl RenderMode for FullControl {
+    fn is_continuous(&self) -> bool {
+        matches!(self.state, PlayState::Playing | PlayState::Reversing)
+    }
+    
+    fn tick(&mut self, dt: f32, _cx: &mut Context<Self>) {
+        const SPEED: f32 = 1.5;
+        match self.state {
+            PlayState::Playing => {
+                self.progress = (self.progress + dt * SPEED * self.direction).clamp(0.0, 1.0);
+                if self.progress >= 1.0 { self.state = PlayState::Idle; } // Stop
+            }
+            PlayState::Reversing => {
+                self.progress = (self.progress - dt * SPEED).max(0.0);
+                if self.progress <= 0.0 { self.state = PlayState::Idle; }
+            }
+            _ => {}
+        }
+    }
+}
+```
+
+### Multi-Stage Animation
+
+```rust
+enum Stage { Idle, FadingIn, Active, FadingOut }
+
+impl RenderMode for MyComponent {
+    fn tick(&mut self, dt: f32, cx: &mut Context<Self>) {
+        const SPEED: f32 = 2.0;
+        
+        match self.stage {
+            Stage::FadingIn => {
+                self.progress = (self.progress + dt * SPEED).min(1.0);
+                if self.progress >= 1.0 {
+                    self.stage = Stage::Active;
+                }
+            }
+            Stage::FadingOut => {
+                self.progress = (self.progress - dt * SPEED).max(0.0);
+                if self.progress <= 0.0 {
+                    self.stage = Stage::Idle;
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    fn is_continuous(&self) -> bool {
+        matches!(self.stage, Stage::FadingIn | Stage::FadingOut)
+    }
+}
+```
 
 ## Installation
-
-Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -23,93 +199,6 @@ gpui = { package = "gpui-unofficial", version = "^1.14.2" }
 gpui-rendermode = { git = "https://github.com/astrimid/gpui-rendermode" }
 ```
 
-## Quick Start
+## License
 
-Here is how to create a progress bar that smoothly fills up only while the user is hovering over it.
-
-### 1. Implement `RenderMode`
-
-Define your state and implement `RenderMode`. You just need to tell the engine *when* to run, and *what* the math is.
-
-```rust
-use gpui::*;
-use gpui_rendermode::RenderMode;
-
-struct HoverButton {
-    progress: f32,
-    is_hovered: bool,
-}
-
-impl RenderMode for HoverButton {
-    // 1. Tell the engine when the animation loop should be active
-    fn is_continuous(&self) -> bool {
-        self.is_hovered
-    }
-
-    // 2. Do your math: `dt` is the physical time in seconds
-    // since the last animation tick.
-    fn tick(&mut self, dt: Duration, _cx: &mut Context<Self>) {
-        if self.is_hovered {
-            self.progress += dt * 1.5; // Fill up over ~0.66 seconds
-            
-            if self.progress >= 1.0 {
-                self.progress = 0.0; // Loop back to zero
-            }
-        }
-    }
-}
-
-```
-
-### 2. Implement standard `Render`
-
-Implement GPUI's standard `Render` trait exactly as you normally would. Use `cx.notify()` when external interactions start and stop animation.
-
-```rust
-impl Render for HoverButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .w(px(200.0))
-            .h(px(40.0))
-            .bg(rgb(0x333333))
-            // The unified GPUI 2 hover event
-            .on_hover(cx.listener(|this, is_hovered: &bool, _window, cx| {
-                this.is_hovered = *is_hovered;
-                if !this.is_hovered {
-                    this.progress = 0.0;
-                }
-                cx.notify(); // Wake up the engine!
-            }))
-            .child(
-                // The animated fill
-                div()
-                    .h_full()
-                    .w(relative(self.progress))
-                    .bg(rgb(0x3b82f6))
-            )
-    }
-}
-
-```
-
-### 3. Instantiate with `new_paced_view`
-
-To render your animated component, bring `PacedViewExt` into scope and construct it using `cx.new_paced_view()` instead of the standard `cx.new_view()`.
-
-```rust
-use gpui_rendermode::PacedViewExt;
-
-// Inside any parent component's render method, or window initialization:
-cx.new_paced_view(|_cx| HoverButton {
-    progress: 0.0,
-    is_hovered: false,
-})
-
-```
-
-## How it works under the hood
-
-When `is_continuous` returns `true`, the `PacedView` wrapper automatically calculates physical Delta Time, executes your `tick(dt)` method, triggers a `cx.notify()` to dirty the element, and schedules itself for the next frame using `cx.on_next_frame(window, ...)`.
-
-When `is_continuous` returns `false`, it drops out of the queue, instantly reducing overhead to zero until state is changed again.
-
+MIT
