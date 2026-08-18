@@ -196,7 +196,7 @@ impl RenderMode for MyComponent {
 ```toml
 [dependencies]
 gpui = { package = "gpui-unofficial", version = "^1.14.2" }
-gpui-rendermode = { git = "https://github.com/astrimid/gpui-rendermode" }
+gpui-rendermode = "0.1.1"
 ```
 
 ## License
